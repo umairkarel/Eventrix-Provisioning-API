@@ -1,0 +1,64 @@
+import uuid
+from datetime import datetime
+from typing import Optional
+from pydantic import BaseModel, field_validator
+from app.models import ClientStatus, CustomDomainStatus
+
+
+class AddonsSchema(BaseModel):
+    geoip: bool = False
+    bot_filter: bool = False
+    gtm_js_proxy: bool = True
+    lib_proxy: bool = False
+    cookie_extension: bool = False
+    rate_limit_rps: int = 50
+
+
+class ClientCreate(BaseModel):
+    name: str
+    subdomain: str
+    container_config: str
+    addons: Optional[AddonsSchema] = None
+
+    @field_validator("subdomain")
+    @classmethod
+    def subdomain_valid(cls, v: str) -> str:
+        import re
+        if not re.match(r'^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$', v):
+            raise ValueError("subdomain must be 2-63 chars, lowercase letters, digits, and hyphens only")
+        return v
+
+
+class ClientUpdate(BaseModel):
+    name: Optional[str] = None
+    container_config: Optional[str] = None
+    addons: Optional[AddonsSchema] = None
+
+
+class ClientResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    subdomain: str
+    container_config: str
+    status: ClientStatus
+    addons: dict
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CustomDomainCreate(BaseModel):
+    domain: str
+
+
+class CustomDomainResponse(BaseModel):
+    id: uuid.UUID
+    client_id: uuid.UUID
+    domain: str
+    status: CustomDomainStatus
+    verified_at: Optional[datetime]
+    created_at: datetime
+    cname_target: Optional[str] = None
+
+    model_config = {"from_attributes": True}
