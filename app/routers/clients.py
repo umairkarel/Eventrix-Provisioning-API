@@ -1,12 +1,15 @@
+import logging
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+
+logger = logging.getLogger(__name__)
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import require_api_key
 from app.database import get_session
 from app.models import ApiKey, Client, ClientStatus
-from app.schemas import AddonsSchema, ClientCreate, ClientResponse, ClientUpdate
+from app.schemas import AddonsSchema, ClientCreate, ClientResponse, ClientUpdate, parse_container_config
 from app.services import traefik as traefik_svc
 from app.services import docker_service, cloudflare
 from app.services.health_poller import poll_until_healthy
@@ -29,11 +32,14 @@ async def create_client(
         raise HTTPException(status_code=409, detail="Subdomain already in use")
 
     addons_dict = body.addons.model_dump() if body.addons else AddonsSchema().model_dump()
+    gtm_container_id, gtm_env = parse_container_config(body.container_config)
     client = Client(
         id=uuid.uuid4(),
         name=body.name,
         subdomain=body.subdomain,
         container_config=body.container_config,
+        gtm_container_id=gtm_container_id,
+        gtm_env=gtm_env,
         addons=addons_dict,
     )
     db.add(client)
@@ -46,19 +52,19 @@ async def create_client(
         await db.commit()
 
         traefik_svc.write_client_config(str(client.id), body.subdomain, addons_dict)
+        if settings.traefik_restart_on_config_change:
+            background_tasks.add_task(docker_service.restart_traefik)
 
-        middlewares = traefik_svc.build_middleware_chain(body.subdomain, addons_dict)
         server_id, preview_id = await docker_service.start_gtm_containers(
             subdomain=body.subdomain,
-            base_domain=settings.base_domain,
             container_config=body.container_config,
-            middlewares=middlewares,
         )
         client.server_container_id = server_id
         client.preview_container_id = preview_id
         await db.commit()
         await db.refresh(client)
     except Exception:
+        logger.exception("Provisioning failed for subdomain %s", body.subdomain)
         # Best-effort cleanup of any resources created before the failure
         if client.dns_record_id:
             try:
@@ -101,6 +107,7 @@ async def get_client(
 async def update_client(
     client_id: uuid.UUID,
     body: ClientUpdate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_session),
     _key: ApiKey = Depends(require_api_key),
 ):
@@ -111,9 +118,12 @@ async def update_client(
         client.name = body.name
     if body.container_config is not None:
         client.container_config = body.container_config
+        client.gtm_container_id, client.gtm_env = parse_container_config(body.container_config)
     if body.addons is not None:
         client.addons = {**client.addons, **body.addons.model_dump(exclude_unset=True)}
         traefik_svc.write_client_config(str(client.id), client.subdomain, client.addons)
+        if settings.traefik_restart_on_config_change:
+            background_tasks.add_task(docker_service.restart_traefik)
     await db.commit()
     await db.refresh(client)
     return client
@@ -122,6 +132,7 @@ async def update_client(
 @router.delete("/{client_id}", status_code=204)
 async def delete_client(
     client_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_session),
     _key: ApiKey = Depends(require_api_key),
 ):
@@ -136,6 +147,8 @@ async def delete_client(
         await cloudflare.delete_record(client.dns_record_id)
 
     traefik_svc.delete_client_config(client.subdomain)
+    if settings.traefik_restart_on_config_change:
+        background_tasks.add_task(docker_service.restart_traefik)
 
     client.status = ClientStatus.deleted
     await db.commit()

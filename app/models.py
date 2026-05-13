@@ -1,7 +1,7 @@
 import uuid
 import enum
 from datetime import datetime, timezone
-from sqlalchemy import String, DateTime, ForeignKey, JSON, Enum as SAEnum
+from sqlalchemy import String, DateTime, ForeignKey, JSON, Enum as SAEnum, Index, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -34,13 +34,23 @@ def _default_addons() -> dict:
 
 class Client(Base):
     __tablename__ = "clients"
+    __table_args__ = (
+        Index(
+            "uq_clients_subdomain_active",
+            "subdomain",
+            unique=True,
+            postgresql_where=text("status != 'deleted'"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    subdomain: Mapped[str] = mapped_column(String(63), unique=True, nullable=False)
+    subdomain: Mapped[str] = mapped_column(String(63), nullable=False)
     container_config: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[ClientStatus] = mapped_column(SAEnum(ClientStatus), default=ClientStatus.provisioning)
     addons: Mapped[dict] = mapped_column(JSON, default=_default_addons)
+    gtm_container_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    gtm_env: Mapped[int | None] = mapped_column(nullable=True)
     dns_record_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     server_container_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     preview_container_id: Mapped[str | None] = mapped_column(String(255), nullable=True)

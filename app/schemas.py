@@ -1,8 +1,23 @@
+import base64
 import uuid
 from datetime import datetime
 from typing import Optional
+from urllib.parse import parse_qs
 from pydantic import BaseModel, field_validator
 from app.models import ClientStatus, CustomDomainStatus
+
+
+def parse_container_config(container_config: str) -> tuple[str | None, int | None]:
+    """Returns (gtm_container_id, gtm_env) parsed from the base64-encoded config string."""
+    try:
+        decoded = base64.b64decode(container_config).decode()
+        params = parse_qs(decoded)
+        container_id = params.get("id", [None])[0]
+        env_str = params.get("env", [None])[0]
+        env = int(env_str) if env_str is not None else None
+        return container_id, env
+    except Exception:
+        return None, None
 
 
 class AddonsSchema(BaseModel):
@@ -40,6 +55,8 @@ class ClientResponse(BaseModel):
     name: str
     subdomain: str
     container_config: str
+    gtm_container_id: Optional[str] = None
+    gtm_env: Optional[int] = None
     status: ClientStatus
     addons: dict
     created_at: datetime

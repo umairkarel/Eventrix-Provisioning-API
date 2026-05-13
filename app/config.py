@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     vm_ip: str = ""
     traefik_conf_dir: str = "/traefik/conf.d"
     mock_cloudflare: bool = False
+    traefik_restart_on_config_change: bool = False
+    preview_use_sidecar: bool = True
+    gtm_image: str = "gcr.io/cloud-tagging-10302018/gtm-cloud-image:stable"
+    gtm_port: int = 8080
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

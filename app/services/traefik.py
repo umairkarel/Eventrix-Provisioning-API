@@ -1,6 +1,7 @@
 import yaml
 from pathlib import Path
 from app.config import settings
+from app.services.docker_service import preview_container_name, server_container_name
 
 
 def build_middleware_chain(subdomain: str, addons: dict) -> list[str]:
@@ -15,6 +16,8 @@ def build_middleware_chain(subdomain: str, addons: dict) -> list[str]:
 
 def generate_client_config(client_id: str, subdomain: str, addons: dict) -> str:
     rate_limit_rps = addons.get("rate_limit_rps", 50)
+    base = settings.base_domain
+    middleware_chain = build_middleware_chain(subdomain, addons)
 
     middlewares: dict = {
         f"rate-limit-{subdomain}": {
@@ -44,7 +47,32 @@ def generate_client_config(client_id: str, subdomain: str, addons: dict) -> str:
             }
         }
 
-    config = {"http": {"middlewares": middlewares}}
+    routers = {
+        f"gtm-{subdomain}": {
+            "rule": f"Host(`{subdomain}.{base}`)",
+            "entryPoints": ["websecure"],
+            "tls": {},
+            "service": f"gtm-{subdomain}-svc",
+            "middlewares": middleware_chain,
+        },
+        f"gtm-preview-{subdomain}": {
+            "rule": f"Host(`preview-{subdomain}.{base}`)",
+            "entryPoints": ["websecure"],
+            "tls": {},
+            "service": f"gtm-preview-{subdomain}-svc",
+        },
+    }
+
+    services = {
+        f"gtm-{subdomain}-svc": {
+            "loadBalancer": {"servers": [{"url": f"http://{server_container_name(subdomain)}:{settings.gtm_port}"}]}
+        },
+        f"gtm-preview-{subdomain}-svc": {
+            "loadBalancer": {"servers": [{"url": f"http://{preview_container_name(subdomain)}:{settings.gtm_port}"}]}
+        },
+    }
+
+    config = {"http": {"routers": routers, "services": services, "middlewares": middlewares}}
     return yaml.dump(config, default_flow_style=False, allow_unicode=True)
 
 
