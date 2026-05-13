@@ -74,6 +74,25 @@ def generate_client_config(client_id: str, subdomain: str, addons: dict) -> str:
         },
     }
 
+    if addons.get("gtm_js_proxy"):
+        routers[f"gtm-js-{subdomain}"] = {
+            "rule": f"Host(`{subdomain}.{base}`) && PathPrefix(`/gtm.js`)",
+            "entryPoints": ["websecure"],
+            "tls": {},
+            "service": "proxy-server-svc",
+            "middlewares": middleware_chain,
+        }
+        routers[f"gtag-js-{subdomain}"] = {
+            "rule": f"Host(`{subdomain}.{base}`) && PathPrefix(`/gtag/js`)",
+            "entryPoints": ["websecure"],
+            "tls": {},
+            "service": "proxy-server-svc",
+            "middlewares": middleware_chain,
+        }
+        services["proxy-server-svc"] = {
+            "loadBalancer": {"servers": [{"url": "http://proxy-server:8000"}]}
+        }
+
     config = {"http": {"routers": routers, "services": services, "middlewares": middlewares}}
     return yaml.dump(config, default_flow_style=False, allow_unicode=True)
 

@@ -178,18 +178,34 @@ async def suspend_client(
 @router.post("/{client_id}/resume", response_model=ClientResponse)
 async def resume_client(
     client_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_session),
     _key: ApiKey = Depends(require_api_key),
 ):
     client = await db.get(Client, client_id)
     if not client or client.status == ClientStatus.deleted:
         raise HTTPException(status_code=404, detail="Client not found")
-    if client.status == ClientStatus.active:
-        return client
+
+    containers_running = False
     if client.server_container_id and client.preview_container_id:
         await docker_service.resume_containers(client.server_container_id, client.preview_container_id)
-    client.status = ClientStatus.active
+        health = await docker_service.container_health(client.server_container_id)
+        containers_running = health != "not_found"
+
+    if not containers_running:
+        # Containers were removed — recreate them and wait for health events
+        server_id, preview_id = await docker_service.start_gtm_containers(
+            client.subdomain, client.container_config
+        )
+        client.server_container_id = server_id
+        client.preview_container_id = preview_id
+        client.status = ClientStatus.provisioning
+    else:
+        client.status = ClientStatus.active
+
     await db.commit()
+    if settings.traefik_restart_on_config_change:
+        background_tasks.add_task(docker_service.restart_traefik)
     await db.refresh(client)
     return client
 
