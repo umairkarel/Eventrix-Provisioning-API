@@ -90,7 +90,7 @@ def _start_gtm_containers_sync(
                 mem_limit=settings.gtm_server_mem_limit,
                 nano_cpus=settings.gtm_server_nano_cpus,
                 healthcheck={
-                    "test": ["CMD", "wget", "--quiet", "--tries=1", "--spider", f"http://localhost:{settings.gtm_port}/healthz"],
+                    "test": ["CMD", "/nodejs/bin/node", "-e", f"require('http').get('http://localhost:{settings.gtm_port}/healthz', r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"],
                     "interval": 30_000_000_000,
                     "timeout": 10_000_000_000,
                     "retries": 3,
@@ -118,7 +118,7 @@ def _start_gtm_containers_sync(
                 mem_limit=settings.gtm_preview_mem_limit,
                 nano_cpus=settings.gtm_preview_nano_cpus,
                 healthcheck={
-                    "test": ["CMD", "wget", "--quiet", "--tries=1", "--spider", f"http://localhost:{settings.gtm_port}/healthz"],
+                    "test": ["CMD", "/nodejs/bin/node", "-e", f"require('http').get('http://localhost:{settings.gtm_port}/healthz', r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"],
                     "interval": 30_000_000_000,
                     "timeout": 10_000_000_000,
                     "retries": 3,
