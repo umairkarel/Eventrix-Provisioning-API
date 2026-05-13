@@ -83,12 +83,12 @@ def _start_gtm_containers_sync(
                         else f"https://preview-{subdomain}.{settings.base_domain}"
                     ),
                     "PORT": str(settings.gtm_port),
-                    "NODE_TLS_REJECT_UNAUTHORIZED": "0",
+                    **({"NODE_TLS_REJECT_UNAUTHORIZED": "0"} if settings.preview_use_sidecar else {}),
                 },
                 network="traefik_public",
                 restart_policy={"Name": "unless-stopped"},
-                mem_limit="512m",
-                nano_cpus=1_000_000_000,
+                mem_limit=settings.gtm_server_mem_limit,
+                nano_cpus=settings.gtm_server_nano_cpus,
                 healthcheck={
                     "test": ["CMD", "wget", "--quiet", "--tries=1", "--spider", f"http://localhost:{settings.gtm_port}/healthz"],
                     "interval": 30_000_000_000,
@@ -115,8 +115,8 @@ def _start_gtm_containers_sync(
                 },
                 network="traefik_public",
                 restart_policy={"Name": "unless-stopped"},
-                mem_limit="256m",
-                nano_cpus=500_000_000,
+                mem_limit=settings.gtm_preview_mem_limit,
+                nano_cpus=settings.gtm_preview_nano_cpus,
                 healthcheck={
                     "test": ["CMD", "wget", "--quiet", "--tries=1", "--spider", f"http://localhost:{settings.gtm_port}/healthz"],
                     "interval": 30_000_000_000,
@@ -126,10 +126,6 @@ def _start_gtm_containers_sync(
                 },
                 detach=True,
             )
-            try:
-                internal = dc.networks.get("gtm_internal")
-            except docker.errors.NotFound:
-                internal = dc.networks.create("gtm_internal", driver="bridge", internal=True)
             internal.connect(preview)
 
             if settings.preview_use_sidecar:
@@ -139,7 +135,7 @@ def _start_gtm_containers_sync(
                     command=_nginx_proxy_command(subdomain),
                     network="traefik_public",
                     restart_policy={"Name": "unless-stopped"},
-                    mem_limit="64m",
+                    mem_limit=settings.gtm_proxy_mem_limit,
                     detach=True,
                 )
 

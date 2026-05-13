@@ -1,3 +1,5 @@
+import os
+import tempfile
 import yaml
 from pathlib import Path
 from app.config import settings
@@ -80,7 +82,18 @@ def write_client_config(client_id: str, subdomain: str, addons: dict) -> None:
     content = generate_client_config(client_id, subdomain, addons)
     conf_dir = Path(settings.traefik_conf_dir)
     conf_dir.mkdir(parents=True, exist_ok=True)
-    (conf_dir / f"client-{subdomain}.yml").write_text(content)
+    target = conf_dir / f"client-{subdomain}.yml"
+    fd, tmp_path = tempfile.mkstemp(dir=conf_dir, suffix=".yml.tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        os.replace(tmp_path, target)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def delete_client_config(subdomain: str) -> None:

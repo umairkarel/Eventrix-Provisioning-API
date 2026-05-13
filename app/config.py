@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     preview_use_sidecar: bool = True
     gtm_image: str = "gcr.io/cloud-tagging-10302018/gtm-cloud-image:stable"
     gtm_port: int = 8080
+    gtm_server_mem_limit: str = "512m"
+    gtm_server_nano_cpus: int = 1_000_000_000
+    gtm_preview_mem_limit: str = "256m"
+    gtm_preview_nano_cpus: int = 500_000_000
+    gtm_proxy_mem_limit: str = "64m"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
