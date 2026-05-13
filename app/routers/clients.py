@@ -12,7 +12,6 @@ from app.models import ApiKey, Client, ClientStatus
 from app.schemas import AddonsSchema, ClientCreate, ClientResponse, ClientUpdate, parse_container_config
 from app.services import traefik as traefik_svc
 from app.services import docker_service, cloudflare
-from app.services.health_poller import poll_until_healthy
 from app.config import settings
 
 router = APIRouter(prefix="/api/v1/clients", tags=["clients"])
@@ -76,7 +75,6 @@ async def create_client(
         await db.commit()
         raise HTTPException(status_code=502, detail="Provisioning failed; resources have been cleaned up")
 
-    background_tasks.add_task(poll_until_healthy, client.id)
     return client
 
 
@@ -140,6 +138,11 @@ async def delete_client(
     if not client or client.status == ClientStatus.deleted:
         raise HTTPException(status_code=404, detail="Client not found")
 
+    # Commit deleted status before stopping containers so the die event
+    # from docker_events.py doesn't misclassify this as an unexpected failure.
+    client.status = ClientStatus.deleted
+    await db.commit()
+
     if client.server_container_id and client.preview_container_id:
         await docker_service.stop_containers(client.server_container_id, client.preview_container_id)
 
@@ -149,9 +152,6 @@ async def delete_client(
     traefik_svc.delete_client_config(client.subdomain)
     if settings.traefik_restart_on_config_change:
         background_tasks.add_task(docker_service.restart_traefik)
-
-    client.status = ClientStatus.deleted
-    await db.commit()
 
 
 @router.post("/{client_id}/suspend", response_model=ClientResponse)
@@ -165,10 +165,12 @@ async def suspend_client(
         raise HTTPException(status_code=404, detail="Client not found")
     if client.status == ClientStatus.suspended:
         return client
-    if client.server_container_id and client.preview_container_id:
-        await docker_service.suspend_containers(client.server_container_id, client.preview_container_id)
+    # Commit suspended status before stopping containers so the die event
+    # from docker_events.py doesn't misclassify this as an unexpected failure.
     client.status = ClientStatus.suspended
     await db.commit()
+    if client.server_container_id and client.preview_container_id:
+        await docker_service.suspend_containers(client.server_container_id, client.preview_container_id)
     await db.refresh(client)
     return client
 

@@ -11,6 +11,7 @@ class ClientStatus(str, enum.Enum):
     provisioning = "provisioning"
     active = "active"
     suspended = "suspended"
+    error = "error"
     deleted = "deleted"
 
 

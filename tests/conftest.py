@@ -34,10 +34,9 @@ def mock_external_services():
         patch("app.routers.clients.docker_service.stop_containers", new_callable=AsyncMock),
         patch("app.routers.clients.docker_service.suspend_containers", new_callable=AsyncMock),
         patch("app.routers.clients.docker_service.resume_containers", new_callable=AsyncMock),
+        patch("app.routers.clients.docker_service.container_health", new_callable=AsyncMock, return_value="healthy"),
         patch("app.routers.clients.traefik_svc.write_client_config"),
         patch("app.routers.clients.traefik_svc.delete_client_config"),
-        patch("app.routers.clients.traefik_svc.build_middleware_chain", return_value=["rate-limit-test@file"]),
-        patch("app.routers.clients.poll_until_healthy", new_callable=AsyncMock),
     ):
         yield
 
@@ -48,6 +47,7 @@ async def api_client(db: AsyncSession):
         yield db
 
     app.dependency_overrides[get_session] = override_session
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        yield ac
+    with patch("app.main.start_event_listener", new_callable=AsyncMock):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            yield ac
     app.dependency_overrides.clear()
