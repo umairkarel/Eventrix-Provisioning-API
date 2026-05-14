@@ -142,6 +142,7 @@ def _start_gtm_containers_sync(
             return server.id, preview.id
 
         except Exception:
+            logger.exception("Failed to provision GTM containers for %s — cleaning up", subdomain)
             for c in [proxy, preview, server]:
                 if c is not None:
                     try:
@@ -180,11 +181,14 @@ def _suspend_containers_sync(server_id: str, preview_id: str) -> None:
                 server_c = dc.containers.get(server_id)
                 subdomain = server_c.name.lstrip("/").removeprefix("gtm-server-")
                 dc.containers.get(preview_proxy_container_name(subdomain)).stop(timeout=10)
+                logger.info("Stopped sidecar for %s", subdomain)
             except (NotFound, APIError):
                 pass
         for cid in [server_id, preview_id]:
             try:
-                dc.containers.get(cid).stop(timeout=10)
+                c = dc.containers.get(cid)
+                c.stop(timeout=10)
+                logger.info("Suspended container %s", c.name)
             except (NotFound, APIError):
                 pass
 
@@ -193,7 +197,9 @@ def _resume_containers_sync(server_id: str, preview_id: str) -> None:
     with _DockerClientCtx() as dc:
         for cid in [server_id, preview_id]:
             try:
-                dc.containers.get(cid).start()
+                c = dc.containers.get(cid)
+                c.start()
+                logger.info("Resumed container %s", c.name)
             except (NotFound, APIError):
                 pass
         if settings.preview_use_sidecar:
@@ -201,6 +207,7 @@ def _resume_containers_sync(server_id: str, preview_id: str) -> None:
                 server_c = dc.containers.get(server_id)
                 subdomain = server_c.name.lstrip("/").removeprefix("gtm-server-")
                 dc.containers.get(preview_proxy_container_name(subdomain)).start()
+                logger.info("Resumed sidecar for %s", subdomain)
             except (NotFound, APIError):
                 pass
 
@@ -255,6 +262,9 @@ def _restart_traefik_sync() -> None:
         containers = dc.containers.list(filters={"label": "com.docker.compose.service=traefik"})
         if containers:
             containers[0].restart(timeout=10)
+            logger.info("Restarted Traefik container %s", containers[0].name)
+        else:
+            logger.warning("No Traefik container found to restart")
 
 
 async def restart_traefik() -> None:

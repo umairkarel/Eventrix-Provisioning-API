@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 async def sync_sidecars() -> None:
+    """Start any stopped sidecar (NGINX HTTPS proxy) containers for active servers on startup."""
     if not settings.preview_use_sidecar:
         return
     async with SessionLocal() as session:
@@ -23,11 +24,14 @@ async def sync_sidecars() -> None:
             select(Server).where(Server.status == ServerStatus.active)
         )
         active_servers = result.scalars().all()
+    recovered = 0
     for server in active_servers:
         try:
             await docker_service.ensure_sidecar_running(server.subdomain)
+            recovered += 1
         except Exception:
             logger.exception("Failed to ensure sidecar for server %s", server.subdomain)
+    logger.info("Sidecar sync complete: checked %d server(s)", recovered)
 
 
 async def sync_traefik_configs() -> None:

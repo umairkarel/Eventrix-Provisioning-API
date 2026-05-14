@@ -1,9 +1,12 @@
+import logging
 import os
 import tempfile
 import yaml
 from pathlib import Path
 from app.config import settings
 from app.services.docker_service import preview_container_name, server_container_name
+
+logger = logging.getLogger(__name__)
 
 
 def build_middleware_chain(subdomain: str, addons: dict) -> list[str]:
@@ -110,6 +113,7 @@ def write_client_config(client_id: str, subdomain: str, addons: dict) -> None:
         with os.fdopen(fd, "w") as f:
             f.write(content)
         os.replace(tmp_path, target)
+        logger.info("Wrote Traefik config for %s → %s", subdomain, target)
     except Exception:
         try:
             os.unlink(tmp_path)
@@ -121,3 +125,4 @@ def write_client_config(client_id: str, subdomain: str, addons: dict) -> None:
 def delete_client_config(subdomain: str) -> None:
     path = Path(settings.traefik_conf_dir) / f"client-{subdomain}.yml"
     path.unlink(missing_ok=True)
+    logger.info("Deleted Traefik config for %s", subdomain)
