@@ -10,18 +10,23 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 
 @pytest_asyncio.fixture
-async def db():
+async def db_factory():
     engine = create_async_engine(TEST_DATABASE_URL)
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-        async with factory() as session:
-            yield session
+        yield factory
     finally:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def db(db_factory):
+    async with db_factory() as session:
+        yield session
 
 
 @pytest.fixture(autouse=True)
@@ -35,6 +40,7 @@ def mock_external_services():
         patch("app.routers.servers.docker_service.suspend_containers", new_callable=AsyncMock),
         patch("app.routers.servers.docker_service.resume_containers", new_callable=AsyncMock),
         patch("app.routers.servers.docker_service.container_health", new_callable=AsyncMock, return_value="healthy"),
+        patch("app.routers.servers.docker_service.restart_traefik", new_callable=AsyncMock),
         patch("app.routers.servers.traefik_svc.write_client_config"),
         patch("app.routers.servers.traefik_svc.delete_client_config"),
     ):
@@ -42,12 +48,15 @@ def mock_external_services():
 
 
 @pytest_asyncio.fixture
-async def api_client(db: AsyncSession):
+async def api_client(db: AsyncSession, db_factory):
     async def override_session():
         yield db
 
     app.dependency_overrides[get_session] = override_session
-    with patch("app.main.start_event_listener", new_callable=AsyncMock):
+    with (
+        patch("app.main.start_event_listener", new_callable=AsyncMock),
+        patch("app.routers.servers.SessionLocal", db_factory),
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             yield ac
     app.dependency_overrides.clear()

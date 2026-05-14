@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 _executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="docker-events")
 
 
+_TERMINAL_CONTAINER_STATES = frozenset({"not_found", "exited", "dead"})
+
+
 async def _recover_provisioning_servers() -> None:
     async with SessionLocal() as db:
         result = await db.execute(
@@ -29,9 +32,22 @@ async def _recover_provisioning_servers() -> None:
                     s.status = ServerStatus.active
                     await db.commit()
                     logger.info("Recovery: server %s (%s) marked active", s.id, s.subdomain)
+        elif status in _TERMINAL_CONTAINER_STATES:
+            # Container is gone — the die event fired before we restarted so it
+            # will never arrive on the stream. Mark error so the server isn't
+            # stuck in provisioning indefinitely.
+            async with SessionLocal() as db:
+                s = await db.get(Server, server.id)
+                if s and s.status == ServerStatus.provisioning:
+                    s.status = ServerStatus.error
+                    await db.commit()
+                    logger.error(
+                        "Recovery: server %s (%s) container is %s — marked error",
+                        s.id, s.subdomain, status,
+                    )
         else:
             logger.info(
-                "Recovery: server %s (%s) still %s — will be caught by event stream",
+                "Recovery: server %s (%s) is %s — waiting for health event",
                 server.id, server.subdomain, status,
             )
 
@@ -67,12 +83,14 @@ async def _handle_event(event: dict) -> None:
             logger.warning("Container %s reported unhealthy", container_name)
 
     elif action == "die":
+        # Brief delay to let Docker settle before reading state (avoids racing a
+        # restart that would make the container appear running again immediately).
         await asyncio.sleep(2)
         async with SessionLocal() as db:
             result = await db.execute(
                 select(Server).where(
                     Server.subdomain == subdomain,
-                    Server.status == ServerStatus.active,
+                    Server.status.in_([ServerStatus.active, ServerStatus.provisioning]),
                 )
             )
             server = result.scalar_one_or_none()
@@ -80,7 +98,7 @@ async def _handle_event(event: dict) -> None:
                 server.status = ServerStatus.error
                 await db.commit()
                 logger.error(
-                    "Container %s died unexpectedly — server %s (%s) marked error",
+                    "Container %s died — server %s (%s) marked error",
                     container_name, server.id, subdomain,
                 )
 

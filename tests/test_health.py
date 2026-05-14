@@ -10,6 +10,7 @@ from app.models import Server, Tenant
 def test_health():
     with (
         patch("app.main.sync_traefik_configs", new_callable=AsyncMock),
+        patch("app.main.sync_sidecars", new_callable=AsyncMock),
         patch("app.main.start_event_listener", new_callable=AsyncMock),
     ):
         with TestClient(app) as client:
