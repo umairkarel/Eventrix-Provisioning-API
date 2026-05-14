@@ -49,12 +49,17 @@ def generate_client_config(client_id: str, subdomain: str, addons: dict) -> str:
             }
         }
 
+    # When gtm_js_proxy is enabled, all traffic routes through proxy-server.
+    # proxy-server handles internal routing: /gtm/* and /_/service_worker/* → GTM container,
+    # everything else → www.googletagmanager.com.
+    main_service = "proxy-server-svc" if addons.get("gtm_js_proxy") else f"gtm-{subdomain}-svc"
+
     routers = {
         f"gtm-{subdomain}": {
             "rule": f"Host(`{subdomain}.{base}`)",
             "entryPoints": ["websecure"],
             "tls": {},
-            "service": f"gtm-{subdomain}-svc",
+            "service": main_service,
             "middlewares": middleware_chain,
         },
         f"gtm-preview-{subdomain}": {
@@ -75,18 +80,16 @@ def generate_client_config(client_id: str, subdomain: str, addons: dict) -> str:
     }
 
     if addons.get("gtm_js_proxy"):
-        routers[f"gtm-js-{subdomain}"] = {
-            "rule": f"Host(`{subdomain}.{base}`) && PathPrefix(`/gtm.js`)",
+        # Collection hits bypass proxy-server entirely for throughput. Browser sends
+        # x-gtm-server-preview cookie directly (synthesized by proxy on /gtm/debug response).
+        # More specific rule wins over the catch-all gtm-{subdomain} router automatically.
+        # NOTE: these paths must match the COLLECTION_PATHS env var on proxy-server (default: /g/collect,/mp/collect).
+        # If COLLECTION_PATHS is customised there, update this rule to match or the bypass will silently not apply.
+        routers[f"gtm-collect-{subdomain}"] = {
+            "rule": f"Host(`{subdomain}.{base}`) && (Path(`/g/collect`) || Path(`/mp/collect`))",
             "entryPoints": ["websecure"],
             "tls": {},
-            "service": "proxy-server-svc",
-            "middlewares": middleware_chain,
-        }
-        routers[f"gtag-js-{subdomain}"] = {
-            "rule": f"Host(`{subdomain}.{base}`) && PathPrefix(`/gtag/js`)",
-            "entryPoints": ["websecure"],
-            "tls": {},
-            "service": "proxy-server-svc",
+            "service": f"gtm-{subdomain}-svc",
             "middlewares": middleware_chain,
         }
         services["proxy-server-svc"] = {

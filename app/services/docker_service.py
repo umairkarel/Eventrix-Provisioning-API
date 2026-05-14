@@ -175,6 +175,13 @@ def _stop_containers_sync(server_id: str, preview_id: str) -> None:
 
 def _suspend_containers_sync(server_id: str, preview_id: str) -> None:
     with _DockerClientCtx() as dc:
+        if settings.preview_use_sidecar:
+            try:
+                server_c = dc.containers.get(server_id)
+                subdomain = server_c.name.lstrip("/").removeprefix("gtm-server-")
+                dc.containers.get(preview_proxy_container_name(subdomain)).stop(timeout=10)
+            except (NotFound, APIError):
+                pass
         for cid in [server_id, preview_id]:
             try:
                 dc.containers.get(cid).stop(timeout=10)
@@ -187,6 +194,13 @@ def _resume_containers_sync(server_id: str, preview_id: str) -> None:
         for cid in [server_id, preview_id]:
             try:
                 dc.containers.get(cid).start()
+            except (NotFound, APIError):
+                pass
+        if settings.preview_use_sidecar:
+            try:
+                server_c = dc.containers.get(server_id)
+                subdomain = server_c.name.lstrip("/").removeprefix("gtm-server-")
+                dc.containers.get(preview_proxy_container_name(subdomain)).start()
             except (NotFound, APIError):
                 pass
 
@@ -246,3 +260,21 @@ def _restart_traefik_sync() -> None:
 async def restart_traefik() -> None:
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, _restart_traefik_sync)
+
+
+def _ensure_sidecar_running_sync(subdomain: str) -> None:
+    with _DockerClientCtx() as dc:
+        try:
+            proxy = dc.containers.get(preview_proxy_container_name(subdomain))
+            if proxy.status != "running":
+                proxy.start()
+                logger.info("Restarted stopped sidecar %s", proxy.name)
+        except NotFound:
+            logger.warning("Sidecar container %s not found — skipping", preview_proxy_container_name(subdomain))
+        except APIError as exc:
+            logger.error("Failed to start sidecar %s: %s", preview_proxy_container_name(subdomain), exc)
+
+
+async def ensure_sidecar_running(subdomain: str) -> None:
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, partial(_ensure_sidecar_running_sync, subdomain))

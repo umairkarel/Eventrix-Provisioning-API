@@ -15,6 +15,21 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(messa
 logger = logging.getLogger(__name__)
 
 
+async def sync_sidecars() -> None:
+    if not settings.preview_use_sidecar:
+        return
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(Server).where(Server.status == ServerStatus.active)
+        )
+        active_servers = result.scalars().all()
+    for server in active_servers:
+        try:
+            await docker_service.ensure_sidecar_running(server.subdomain)
+        except Exception:
+            logger.exception("Failed to ensure sidecar for server %s", server.subdomain)
+
+
 async def sync_traefik_configs() -> None:
     async with SessionLocal() as session:
         result = await session.execute(
@@ -39,6 +54,7 @@ async def sync_traefik_configs() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     await sync_traefik_configs()
+    await sync_sidecars()
     task = asyncio.create_task(start_event_listener())
     try:
         yield
