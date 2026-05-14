@@ -4,11 +4,10 @@ from datetime import datetime
 from typing import Optional
 from urllib.parse import parse_qs
 from pydantic import BaseModel, field_validator
-from app.models import ClientStatus, CustomDomainStatus
+from app.models import ServerStatus, CustomDomainStatus
 
 
 def parse_container_config(container_config: str) -> tuple[str | None, int | None]:
-    """Returns (gtm_container_id, gtm_env) parsed from the base64-encoded config string."""
     try:
         decoded = base64.b64decode(container_config).decode()
         params = parse_qs(decoded)
@@ -20,6 +19,8 @@ def parse_container_config(container_config: str) -> tuple[str | None, int | Non
         return None, None
 
 
+# ── Addons ────────────────────────────────────────────────────────────────────
+
 class AddonsSchema(BaseModel):
     geoip: bool = False
     bot_filter: bool = False
@@ -29,7 +30,42 @@ class AddonsSchema(BaseModel):
     rate_limit_rps: int = 50
 
 
-class ClientCreate(BaseModel):
+# ── Tenant ────────────────────────────────────────────────────────────────────
+
+class TenantCreate(BaseModel):
+    name: str
+
+
+class TenantResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── API Key ───────────────────────────────────────────────────────────────────
+
+class ApiKeyCreate(BaseModel):
+    name: str
+
+
+class ApiKeyResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ApiKeyCreateResponse(ApiKeyResponse):
+    """Returned only on creation — includes the raw key (shown once, never again)."""
+    key: str
+
+
+# ── Server ────────────────────────────────────────────────────────────────────
+
+class ServerCreate(BaseModel):
     name: str
     subdomain: str
     container_config: str
@@ -40,24 +76,25 @@ class ClientCreate(BaseModel):
     def subdomain_valid(cls, v: str) -> str:
         import re
         if not re.match(r'^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$', v):
-            raise ValueError("subdomain must be 2-63 chars, lowercase letters, digits, and hyphens only")
+            raise ValueError("subdomain must be 2-63 chars, lowercase letters, digits, hyphens only")
         return v
 
 
-class ClientUpdate(BaseModel):
+class ServerUpdate(BaseModel):
     name: Optional[str] = None
     container_config: Optional[str] = None
     addons: Optional[AddonsSchema] = None
 
 
-class ClientResponse(BaseModel):
+class ServerResponse(BaseModel):
     id: uuid.UUID
+    tenant_id: uuid.UUID
     name: str
     subdomain: str
     container_config: str
     gtm_container_id: Optional[str] = None
     gtm_env: Optional[int] = None
-    status: ClientStatus
+    status: ServerStatus
     addons: dict
     created_at: datetime
     updated_at: datetime
@@ -65,13 +102,15 @@ class ClientResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Custom Domain ─────────────────────────────────────────────────────────────
+
 class CustomDomainCreate(BaseModel):
     domain: str
 
 
 class CustomDomainResponse(BaseModel):
     id: uuid.UUID
-    client_id: uuid.UUID
+    server_id: uuid.UUID
     domain: str
     status: CustomDomainStatus
     verified_at: Optional[datetime]

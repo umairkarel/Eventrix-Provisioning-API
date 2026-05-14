@@ -1,35 +1,37 @@
 import pytest
-import bcrypt
 import uuid
+import bcrypt
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models import ApiKey
+from app.models import ApiKey, Tenant
 
 
-async def create_api_key(db: AsyncSession, name: str, raw_key: str) -> str:
+async def create_tenant_and_key(db: AsyncSession, raw_key: str) -> tuple[Tenant, ApiKey]:
+    tenant = Tenant(id=uuid.uuid4(), name="Auth Test Tenant")
+    db.add(tenant)
+    await db.flush()
     hashed = bcrypt.hashpw(raw_key.encode(), bcrypt.gensalt()).decode()
-    key = ApiKey(id=uuid.uuid4(), name=name, key_hash=hashed)
+    key = ApiKey(id=uuid.uuid4(), tenant_id=tenant.id, name="test", key_hash=hashed)
     db.add(key)
     await db.commit()
-    return raw_key
+    return tenant, key
 
 
 @pytest.mark.asyncio
 async def test_missing_api_key_returns_401(api_client: AsyncClient):
-    response = await api_client.get("/api/v1/clients")
+    response = await api_client.get("/api/v1/servers")
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_invalid_api_key_returns_401(api_client: AsyncClient, db: AsyncSession):
-    await create_api_key(db, "existing", "valid-key-xyz")
-    response = await api_client.get("/api/v1/clients", headers={"X-API-Key": "wrong-key"})
+async def test_invalid_api_key_returns_401(api_client: AsyncClient):
+    response = await api_client.get("/api/v1/servers", headers={"X-API-Key": "wrong"})
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_valid_api_key_passes(api_client: AsyncClient, db: AsyncSession):
     raw_key = "test-key-abc123"
-    await create_api_key(db, "test", raw_key)
-    response = await api_client.get("/api/v1/clients", headers={"X-API-Key": raw_key})
+    await create_tenant_and_key(db, raw_key)
+    response = await api_client.get("/api/v1/servers", headers={"X-API-Key": raw_key})
     assert response.status_code == 200

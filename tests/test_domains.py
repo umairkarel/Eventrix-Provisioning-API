@@ -1,42 +1,33 @@
 import pytest
-import uuid
-import bcrypt
 from unittest.mock import AsyncMock, patch
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.models import ApiKey
-
-RAW_KEY = "domain-test-key"
 
 
-async def seed_key(db: AsyncSession):
-    hashed = bcrypt.hashpw(RAW_KEY.encode(), bcrypt.gensalt()).decode()
-    db.add(ApiKey(id=uuid.uuid4(), name="test", key_hash=hashed))
-    await db.commit()
+async def make_tenant_with_key(api_client: AsyncClient) -> tuple[str, str]:
+    r = await api_client.post("/api/v1/tenants", json={"name": "Domain Test Tenant"})
+    tenant_id = r.json()["id"]
+    kr = await api_client.post(f"/api/v1/tenants/{tenant_id}/keys", json={"name": "k"})
+    return tenant_id, kr.json()["key"]
 
 
-def auth():
-    return {"X-API-Key": RAW_KEY}
-
-
-async def create_client(api_client: AsyncClient, subdomain: str) -> str:
+async def create_server(api_client: AsyncClient, subdomain: str, key: str) -> str:
     r = await api_client.post(
-        "/api/v1/clients",
+        "/api/v1/servers",
         json={"name": "Test", "subdomain": subdomain, "container_config": "dGVzdA=="},
-        headers=auth(),
+        headers={"X-API-Key": key},
     )
     return r.json()["id"]
 
 
 @pytest.mark.asyncio
-async def test_add_custom_domain(api_client: AsyncClient, db: AsyncSession):
-    await seed_key(db)
-    client_id = await create_client(api_client, "cust1")
+async def test_add_custom_domain(api_client: AsyncClient):
+    _, key = await make_tenant_with_key(api_client)
+    server_id = await create_server(api_client, "cust1", key)
     with patch("app.routers.domains.poll_dns_until_verified", new_callable=AsyncMock):
         response = await api_client.post(
-            f"/api/v1/clients/{client_id}/custom-domain",
+            f"/api/v1/servers/{server_id}/custom-domain",
             json={"domain": "tracking.example.com"},
-            headers=auth(),
+            headers={"X-API-Key": key},
         )
     assert response.status_code == 201
     data = response.json()
@@ -46,33 +37,58 @@ async def test_add_custom_domain(api_client: AsyncClient, db: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_add_custom_domain_duplicate(api_client: AsyncClient, db: AsyncSession):
-    await seed_key(db)
-    client_id = await create_client(api_client, "cust2")
+async def test_add_custom_domain_duplicate(api_client: AsyncClient):
+    _, key = await make_tenant_with_key(api_client)
+    server_id = await create_server(api_client, "cust2", key)
     with patch("app.routers.domains.poll_dns_until_verified", new_callable=AsyncMock):
-        await api_client.post(f"/api/v1/clients/{client_id}/custom-domain", json={"domain": "dup.example.com"}, headers=auth())
-        response = await api_client.post(f"/api/v1/clients/{client_id}/custom-domain", json={"domain": "dup2.example.com"}, headers=auth())
+        await api_client.post(
+            f"/api/v1/servers/{server_id}/custom-domain",
+            json={"domain": "dup.example.com"},
+            headers={"X-API-Key": key},
+        )
+        response = await api_client.post(
+            f"/api/v1/servers/{server_id}/custom-domain",
+            json={"domain": "dup2.example.com"},
+            headers={"X-API-Key": key},
+        )
     assert response.status_code == 409
 
 
 @pytest.mark.asyncio
-async def test_custom_domain_status(api_client: AsyncClient, db: AsyncSession):
-    await seed_key(db)
-    client_id = await create_client(api_client, "cust3")
+async def test_custom_domain_status(api_client: AsyncClient):
+    _, key = await make_tenant_with_key(api_client)
+    server_id = await create_server(api_client, "cust3", key)
     with patch("app.routers.domains.poll_dns_until_verified", new_callable=AsyncMock):
-        await api_client.post(f"/api/v1/clients/{client_id}/custom-domain", json={"domain": "status.example.com"}, headers=auth())
-    response = await api_client.get(f"/api/v1/clients/{client_id}/custom-domain/status", headers=auth())
+        await api_client.post(
+            f"/api/v1/servers/{server_id}/custom-domain",
+            json={"domain": "status.example.com"},
+            headers={"X-API-Key": key},
+        )
+    response = await api_client.get(
+        f"/api/v1/servers/{server_id}/custom-domain/status",
+        headers={"X-API-Key": key},
+    )
     assert response.status_code == 200
     assert response.json()["status"] == "pending_dns"
 
 
 @pytest.mark.asyncio
-async def test_remove_custom_domain(api_client: AsyncClient, db: AsyncSession):
-    await seed_key(db)
-    client_id = await create_client(api_client, "cust4")
+async def test_remove_custom_domain(api_client: AsyncClient):
+    _, key = await make_tenant_with_key(api_client)
+    server_id = await create_server(api_client, "cust4", key)
     with patch("app.routers.domains.poll_dns_until_verified", new_callable=AsyncMock):
-        await api_client.post(f"/api/v1/clients/{client_id}/custom-domain", json={"domain": "remove.example.com"}, headers=auth())
-    response = await api_client.delete(f"/api/v1/clients/{client_id}/custom-domain", headers=auth())
+        await api_client.post(
+            f"/api/v1/servers/{server_id}/custom-domain",
+            json={"domain": "remove.example.com"},
+            headers={"X-API-Key": key},
+        )
+    response = await api_client.delete(
+        f"/api/v1/servers/{server_id}/custom-domain",
+        headers={"X-API-Key": key},
+    )
     assert response.status_code == 204
-    status_resp = await api_client.get(f"/api/v1/clients/{client_id}/custom-domain/status", headers=auth())
+    status_resp = await api_client.get(
+        f"/api/v1/servers/{server_id}/custom-domain/status",
+        headers={"X-API-Key": key},
+    )
     assert status_resp.status_code == 404

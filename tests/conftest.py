@@ -28,15 +28,15 @@ async def db():
 def mock_external_services():
     """Mock all external service calls (Cloudflare, Docker, Traefik file I/O) in every test."""
     with (
-        patch("app.routers.clients.cloudflare.create_a_record", new_callable=AsyncMock, return_value="dns-record-id"),
-        patch("app.routers.clients.cloudflare.delete_record", new_callable=AsyncMock),
-        patch("app.routers.clients.docker_service.start_gtm_containers", new_callable=AsyncMock, return_value=("server-cid", "preview-cid")),
-        patch("app.routers.clients.docker_service.stop_containers", new_callable=AsyncMock),
-        patch("app.routers.clients.docker_service.suspend_containers", new_callable=AsyncMock),
-        patch("app.routers.clients.docker_service.resume_containers", new_callable=AsyncMock),
-        patch("app.routers.clients.docker_service.container_health", new_callable=AsyncMock, return_value="healthy"),
-        patch("app.routers.clients.traefik_svc.write_client_config"),
-        patch("app.routers.clients.traefik_svc.delete_client_config"),
+        patch("app.routers.servers.cloudflare.create_a_record", new_callable=AsyncMock, return_value="dns-record-id"),
+        patch("app.routers.servers.cloudflare.delete_record", new_callable=AsyncMock),
+        patch("app.routers.servers.docker_service.start_gtm_containers", new_callable=AsyncMock, return_value=("server-cid", "preview-cid")),
+        patch("app.routers.servers.docker_service.stop_containers", new_callable=AsyncMock),
+        patch("app.routers.servers.docker_service.suspend_containers", new_callable=AsyncMock),
+        patch("app.routers.servers.docker_service.resume_containers", new_callable=AsyncMock),
+        patch("app.routers.servers.docker_service.container_health", new_callable=AsyncMock, return_value="healthy"),
+        patch("app.routers.servers.traefik_svc.write_client_config"),
+        patch("app.routers.servers.traefik_svc.delete_client_config"),
     ):
         yield
 
